@@ -35,6 +35,69 @@
 //    [self writeDispatchSource];
 }
 
+- (void)source_type_timer {
+    dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+    // 将定时器设置为 15 秒后，不重复，允许延迟 1 秒。
+    dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 15ull * NSEC_PER_SEC), DISPATCH_TIME_FOREVER, 1ull * NSEC_PER_SEC);
+    // 指定定时器指定时间内执行的处理
+    dispatch_source_set_event_handler(timer, ^{
+        NSLog(@"wake up!");
+        // 取消 Dispatch Source
+        dispatch_source_cancel(timer);
+    });
+    //指定取消 Dispatch Source 时的处理
+    dispatch_source_set_cancel_handler(timer, ^{
+        NSLog(@"cancelled");
+    });
+    // 启动 Dispatch Source
+    dispatch_resume(timer);
+}
+
+- (void)source_type_read {
+    __block size_t total = 0;
+    // 要读取的字节数
+    size_t size = 1024 * 1024;
+    char *buff = (char *)malloc(size);
+    
+    NSString *filePath = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];
+    NSString *fileName = [filePath stringByAppendingPathComponent:@"markdown语法.md"];
+    int fd = open([fileName UTF8String], O_WRONLY | O_CREAT | O_TRUNC, (S_IRUSR | S_IWUSR | S_ISUID | S_ISGID));
+    NSLog(@"write fd: %d", fd);
+    if (fd == -1) return;
+    
+    // 设定为异步映像
+    fcntl(fd, F_SETFL, O_NONBLOCK);
+    // 获取用于追加事件处理的 Global Dispatch Queue
+    dispatch_queue_t queue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
+    // 基于 READ 事件的 Dispatch Source
+    dispatch_source_t source = dispatch_source_create(DISPATCH_SOURCE_TYPE_READ, fd, 0, queue);
+    // 指定发生 READ 事件时执行的处理
+    dispatch_source_set_event_handler(source, ^{
+       // 获取可读写的字节数
+        size_t available = dispatch_source_get_data(source);
+        // 从映像中读取
+        ssize_t length = read(fd, buff, available);
+        // 发生错误时取消 Dispatch Source
+        if (length < 0) {
+            dispatch_source_cancel(source);
+        }
+        total += length;
+        if (total == size) {
+            // buff 的处理
+            NSLog(@"对 buff 进行处理");
+            // 处理结束后，取消 Dispatch Source
+            dispatch_source_cancel(source);
+        }
+    });
+    // 指定取消 Dispatch Source 时的处理
+    dispatch_source_set_cancel_handler(source, ^{
+        free(buff);
+        close(fd);
+    });
+    // 启动 Dispatch Source
+    dispatch_resume(source);
+}
+
 - (void)writeDispatchSource {
     NSString *filePath = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];
     NSString *fileName = [filePath stringByAppendingPathComponent:@"markdown语法.md"];
